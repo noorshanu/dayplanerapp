@@ -19,7 +19,7 @@ A production-ready full-stack Daily Routine Planner with Email & Telegram remind
 - 📧 **Email Reminders** - Beautiful HTML emails via Gmail SMTP
 - 🤖 **Telegram Integration** - Connect bot for mobile reminders
 - 🌍 **Timezone Support** - Per-user timezone configuration
-- 🎨 **Modern UI** - Clean, responsive design with dark mode
+- 🎨 **Modern UI** - Clean, responsive design with dark modesss
 
 ### 🔥 Enhanced Focus Features
 
