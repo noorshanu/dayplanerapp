@@ -4,8 +4,12 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
+import Toggle from '@/components/ui/Toggle';
 import PlanCard from '@/components/PlanCard';
 import ScheduleView from '@/components/ScheduleView';
+import LiveNowMode from '@/components/LiveNowMode';
+import DisciplineScore from '@/components/DisciplineScore';
+import RealityMode from '@/components/RealityMode';
 
 interface Plan {
     _id: string;
@@ -22,15 +26,24 @@ interface Block {
     topic?: string | null;
 }
 
+interface Settings {
+    realityModeEnabled: boolean;
+}
+
+type ViewMode = 'live' | 'schedule';
+
 export default function DashboardPage() {
     const [plans, setPlans] = useState<Plan[]>([]);
     const [activePlanBlocks, setActivePlanBlocks] = useState<Block[]>([]);
     const [currentTime, setCurrentTime] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [viewMode, setViewMode] = useState<ViewMode>('live');
+    const [realityMode, setRealityMode] = useState(false);
 
     useEffect(() => {
         fetchPlans();
+        fetchSettings();
         updateCurrentTime();
         const interval = setInterval(updateCurrentTime, 60000);
         return () => clearInterval(interval);
@@ -40,6 +53,18 @@ export default function DashboardPage() {
         const now = new Date();
         const time = now.toTimeString().slice(0, 5);
         setCurrentTime(time);
+    };
+
+    const fetchSettings = async () => {
+        try {
+            const response = await fetch('/api/settings');
+            const data = await response.json();
+            if (response.ok && data.settings) {
+                setRealityMode(data.settings.realityModeEnabled || false);
+            }
+        } catch (error) {
+            console.error('Failed to fetch settings:', error);
+        }
     };
 
     const fetchPlans = async () => {
@@ -93,6 +118,20 @@ export default function DashboardPage() {
         }
     };
 
+    const toggleRealityMode = async () => {
+        const newValue = !realityMode;
+        setRealityMode(newValue);
+        try {
+            await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ realityModeEnabled: newValue }),
+            });
+        } catch (error) {
+            console.error('Failed to update reality mode:', error);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-[50vh]">
@@ -106,9 +145,26 @@ export default function DashboardPage() {
 
     const activePlan = plans.find((p) => p.active);
 
+    // Reality Mode - Ultra minimal view
+    if (realityMode) {
+        return (
+            <div className="py-8">
+                <div className="flex justify-end mb-4">
+                    <Toggle
+                        checked={realityMode}
+                        onChange={toggleRealityMode}
+                        label=""
+                        description=""
+                    />
+                </div>
+                <RealityMode enabled={realityMode} />
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-8 py-8">
-            {/* Header */}
+            {/* Header with Reality Mode Toggle */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
@@ -118,11 +174,18 @@ export default function DashboardPage() {
                         Welcome back! Here&apos;s your daily routine.
                     </p>
                 </div>
-                <Link href="/plan/create">
-                    <Button>
-                        <span className="mr-2">+</span> Create Plan
-                    </Button>
-                </Link>
+                <div className="flex items-center gap-3">
+                    <Toggle
+                        checked={realityMode}
+                        onChange={toggleRealityMode}
+                        label="Reality Mode"
+                    />
+                    <Link href="/plan/create">
+                        <Button>
+                            <span className="mr-2">+</span> Create Plan
+                        </Button>
+                    </Link>
+                </div>
             </div>
 
             {error && (
@@ -131,41 +194,76 @@ export default function DashboardPage() {
                 </div>
             )}
 
-            {/* Today's Schedule */}
-            {activePlan && (
-                <Card>
-                    <div className="flex items-center justify-between mb-6">
-                        <div>
-                            <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                                Today&apos;s Schedule
-                            </h2>
-                            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-                                From: {activePlan.title}
-                            </p>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-sm text-slate-500 dark:text-slate-400">Current Time</p>
-                            <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-                                {currentTime}
-                            </p>
-                        </div>
-                    </div>
+            {/* Discipline Score + Live Now Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Discipline Score */}
+                <div className="lg:col-span-1">
+                    <DisciplineScore />
+                </div>
 
-                    <ScheduleView blocks={activePlanBlocks} currentTime={currentTime} />
-                </Card>
-            )}
+                {/* Live Now / Schedule View */}
+                <div className="lg:col-span-2">
+                    <Card>
+                        {/* View Toggle */}
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => setViewMode('live')}
+                                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${viewMode === 'live'
+                                            ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                        }`}
+                                >
+                                    🔴 Live Now
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('schedule')}
+                                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${viewMode === 'schedule'
+                                            ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300'
+                                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                                        }`}
+                                >
+                                    📋 Full Schedule
+                                </button>
+                            </div>
+                            {activePlan && (
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                    {activePlan.title}
+                                </p>
+                            )}
+                        </div>
 
-            {!activePlan && plans.length > 0 && (
-                <Card className="text-center py-12">
-                    <span className="text-4xl mb-4 block">📋</span>
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
-                        No active plan
-                    </h3>
-                    <p className="text-slate-600 dark:text-slate-400 mb-4">
-                        Set one of your plans as active to see today&apos;s schedule
-                    </p>
-                </Card>
-            )}
+                        {/* Content */}
+                        {activePlan ? (
+                            viewMode === 'live' ? (
+                                <LiveNowMode />
+                            ) : (
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-semibold text-slate-900 dark:text-white">
+                                            Today&apos;s Schedule
+                                        </h3>
+                                        <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">
+                                            {currentTime}
+                                        </p>
+                                    </div>
+                                    <ScheduleView blocks={activePlanBlocks} currentTime={currentTime} />
+                                </div>
+                            )
+                        ) : (
+                            <div className="text-center py-12">
+                                <span className="text-4xl mb-4 block">📋</span>
+                                <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">
+                                    No active plan
+                                </h3>
+                                <p className="text-slate-600 dark:text-slate-400 mb-4">
+                                    Set one of your plans as active to see today&apos;s schedule
+                                </p>
+                            </div>
+                        )}
+                    </Card>
+                </div>
+            </div>
 
             {/* Plans List */}
             <div>

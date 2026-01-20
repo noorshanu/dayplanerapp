@@ -15,7 +15,7 @@ export async function GET() {
     await connectDB();
 
     const user = await User.findById(tokenUser.userId).select(
-      'email timezone reminderPrefs telegramChatId'
+      'email timezone reminderPrefs telegramChatId realityModeEnabled disciplineScore'
     );
 
     if (!user) {
@@ -28,6 +28,8 @@ export async function GET() {
         timezone: user.timezone,
         reminderPrefs: user.reminderPrefs,
         telegramConnected: !!user.telegramChatId,
+        realityModeEnabled: user.realityModeEnabled || false,
+        disciplineScore: user.disciplineScore || { today: 0, weeklyAverage: 0, bestDay: '' },
       },
       timezones: TIMEZONES,
     });
@@ -49,7 +51,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { timezone, reminderPrefs } = body;
+    const { timezone, reminderPrefs, realityModeEnabled } = body;
 
     await connectDB();
 
@@ -89,6 +91,11 @@ export async function PUT(request: NextRequest) {
       }
     }
 
+    // Update reality mode if provided
+    if (typeof realityModeEnabled === 'boolean') {
+      user.realityModeEnabled = realityModeEnabled;
+    }
+
     await user.save();
 
     return NextResponse.json({
@@ -97,6 +104,7 @@ export async function PUT(request: NextRequest) {
         timezone: user.timezone,
         reminderPrefs: user.reminderPrefs,
         telegramConnected: !!user.telegramChatId,
+        realityModeEnabled: user.realityModeEnabled,
       },
     });
   } catch (error) {

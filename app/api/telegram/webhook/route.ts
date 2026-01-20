@@ -86,6 +86,59 @@ export async function POST(request: NextRequest) {
         chatId,
         `ℹ️ <b>Connection Status</b>\n\nYour Telegram Chat ID: <code>${chatId}</code>\n\nIf you're connected, you'll receive reminders at your scheduled times. Check your settings at ${APP_URL}/settings.`
       );
+    } else if (text === '/great' || text === '/okay' || text === '/bad') {
+      // Handle reflection mood commands
+      const mood = text.slice(1); // Remove the '/'
+      try {
+        // Find user by chatId and submit reflection
+        const connectDB = (await import('@/lib/db')).default;
+        const User = (await import('@/models/User')).default;
+        const DailyReflection = (await import('@/models/DailyReflection')).default;
+        const { getDateInTimezone } = await import('@/lib/timezone');
+
+        await connectDB();
+        const user = await User.findOne({ telegramChatId: chatId });
+
+        if (user) {
+          const date = getDateInTimezone(user.timezone);
+
+          // Check if reflection already exists
+          const existing = await DailyReflection.findOne({
+            userId: user._id,
+            date,
+          });
+
+          if (existing) {
+            existing.mood = mood as 'great' | 'okay' | 'bad';
+            existing.disciplineScore = user.disciplineScore?.today || 0;
+            await existing.save();
+          } else {
+            await DailyReflection.create({
+              userId: user._id,
+              date,
+              mood: mood as 'great' | 'okay' | 'bad',
+              disciplineScore: user.disciplineScore?.today || 0,
+            });
+          }
+
+          const moodEmoji = mood === 'great' ? '😄' : mood === 'okay' ? '😐' : '😞';
+          await sendTelegramMessage(
+            chatId,
+            `${moodEmoji} <b>Reflection Saved!</b>\n\nThanks for checking in. Your "${mood}" mood has been recorded for today.\n\nKeep building discipline! 💪`
+          );
+        } else {
+          await sendTelegramMessage(
+            chatId,
+            `❌ Your Telegram isn't connected to an account. Please connect at ${APP_URL}/settings`
+          );
+        }
+      } catch (error) {
+        console.error('Reflection save error:', error);
+        await sendTelegramMessage(
+          chatId,
+          `❌ Failed to save reflection. Please try again or use the web app.`
+        );
+      }
     }
 
     return NextResponse.json({ ok: true });
