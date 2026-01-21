@@ -15,7 +15,7 @@ export async function GET() {
     await connectDB();
 
     const plans = await Plan.find({ userId: user.userId })
-      .sort({ createdAt: -1 })
+      .sort({ date: -1, createdAt: -1 })
       .lean();
 
     // Get block counts for each plan
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, blocks } = body;
+    const { title, date, active, blocks } = body;
 
     if (!title || title.trim().length === 0) {
       return NextResponse.json(
@@ -57,13 +57,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!date) {
+      return NextResponse.json(
+        { error: 'Plan date is required' },
+        { status: 400 }
+      );
+    }
+
     await connectDB();
+
+    // If this plan should be active, deactivate other plans first
+    if (active) {
+      await Plan.updateMany(
+        { userId: user.userId, active: true },
+        { active: false }
+      );
+    }
 
     // Create the plan
     const plan = await Plan.create({
       userId: user.userId,
       title: title.trim(),
-      active: false,
+      date,
+      active: active || false,
     });
 
     // Create blocks if provided

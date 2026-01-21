@@ -3,6 +3,7 @@ import connectDB from '@/lib/db';
 import User from '@/models/User';
 import OTP from '@/models/OTP';
 import { verifyOTP, generateToken, setAuthCookie } from '@/lib/auth';
+import { sendWelcomeEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   try {
@@ -76,6 +77,9 @@ export async function POST(request: NextRequest) {
     });
 
     await setAuthCookie(token);
+
+    // Send welcome email (fire and forget)
+    sendWelcomeEmail(user.email).catch(console.error);
 
     return NextResponse.json({
       message: 'Email verified successfully!',

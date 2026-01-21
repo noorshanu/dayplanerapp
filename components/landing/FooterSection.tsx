@@ -22,9 +22,22 @@ export default function FooterSection() {
                         </Link>
                     </div>
 
-                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                        © {new Date().getFullYear()} Day Planner. All rights reserved.
-                    </p>
+                    <div className="text-center md:text-right">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                            © {new Date().getFullYear()} Day Planner. All rights reserved.
+                        </p>
+                        <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
+                            Made with ❤️ by{' '}
+                            <a
+                                href="https://www.nooralam.pro"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-500 hover:text-indigo-600 transition-colors font-medium"
+                            >
+                                Noor Alam
+                            </a>
+                        </p>
+                    </div>
                 </div>
             </div>
         </footer>
