@@ -1,25 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectDB from '@/lib/db';
 import User from '@/models/User';
+import TelegramLink from '@/models/TelegramLink';
 import { getCurrentUser } from '@/lib/auth';
 import { generateTelegramLinkToken } from '@/lib/telegram';
-
-// Store for pending link tokens (in production, use Redis or database)
-// Map of token -> { userId, expiresAt }
-const pendingLinks = new Map<
-  string,
-  { userId: string; email: string; expiresAt: number }
->();
-
-// Clean up expired tokens periodically
-function cleanupExpiredTokens() {
-  const now = Date.now();
-  for (const [token, data] of pendingLinks.entries()) {
-    if (now > data.expiresAt) {
-      pendingLinks.delete(token);
-    }
-  }
-}
 
 // POST /api/telegram/link - Generate a link token for the user
 export async function POST() {
@@ -29,19 +13,20 @@ export async function POST() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    cleanupExpiredTokens();
+    await connectDB();
 
     // Generate unique token
     const linkToken = generateTelegramLinkToken();
 
-    // Store the pending link (expires in 10 minutes)
-    pendingLinks.set(linkToken, {
+    // Store in MongoDB (expires in 10 minutes)
+    await TelegramLink.create({
+      token: linkToken,
       userId: tokenUser.userId,
       email: tokenUser.email,
-      expiresAt: Date.now() + 10 * 60 * 1000,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
 
-    const botUsername = 'letsplanourday_bot';
+    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'letsplanourday_bot';
     const deepLink = `https://t.me/${botUsername}?start=${linkToken}`;
 
     return NextResponse.json({
@@ -86,7 +71,7 @@ export async function DELETE() {
   }
 }
 
-// GET /api/telegram/link?token=xxx - Verify and use a link token (called by webhook)
+// GET /api/telegram/link?token=xxx&chatId=xxx - Verify and use a link token
 export async function GET(request: NextRequest) {
   try {
     const token = request.nextUrl.searchParams.get('token');
@@ -99,9 +84,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    cleanupExpiredTokens();
+    await connectDB();
 
-    const pendingLink = pendingLinks.get(token);
+    // Find the pending link in MongoDB
+    const pendingLink = await TelegramLink.findOne({
+      token,
+      used: false,
+      expiresAt: { $gt: new Date() },
+    });
+
     if (!pendingLink) {
       return NextResponse.json(
         { error: 'Invalid or expired token' },
@@ -109,15 +100,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await connectDB();
-
     // Update user with Telegram chat ID
     await User.findByIdAndUpdate(pendingLink.userId, {
       telegramChatId: chatId,
     });
 
-    // Remove used token
-    pendingLinks.delete(token);
+    // Mark token as used
+    pendingLink.used = true;
+    await pendingLink.save();
 
     return NextResponse.json({
       message: 'Telegram connected successfully',
