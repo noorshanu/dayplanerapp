@@ -41,7 +41,7 @@ export async function POST() {
       expiresAt: Date.now() + 10 * 60 * 1000,
     });
 
-    const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'your_bot';
+    const botUsername = 'dayplanerbot';
     const deepLink = `https://t.me/${botUsername}?start=${linkToken}`;
 
     return NextResponse.json({
