@@ -1,5 +1,3 @@
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-
 interface TelegramResponse {
   ok: boolean;
   result?: unknown;
@@ -10,6 +8,8 @@ export async function sendTelegramMessage(
   chatId: string,
   message: string
 ): Promise<boolean> {
+  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+  
   if (!TELEGRAM_BOT_TOKEN) {
     console.error('Telegram bot token not configured');
     return false;

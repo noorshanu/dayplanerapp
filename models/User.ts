@@ -84,7 +84,7 @@ const UserSchema = new Schema<IUser>(
     },
     timezone: {
       type: String,
-      default: 'UTC',
+      default: 'Asia/Kolkata',
     },
     realityModeEnabled: {
       type: Boolean,
