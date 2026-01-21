@@ -3,39 +3,24 @@ import connectDB from '@/lib/db';
 import User from '@/models/User';
 import Plan from '@/models/Plan';
 import PlanBlock from '@/models/PlanBlock';
-import { getCurrentTimeInTimezone, isTimeMatch } from '@/lib/timezone';
+import TaskLog from '@/models/TaskLog';
+import { getCurrentTimeInTimezone, getDateInTimezone, timeToMinutes } from '@/lib/timezone';
 import { sendReminderEmail, ReminderData } from '@/lib/email';
 import { sendReminderTelegram } from '@/lib/telegram';
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
-// Track sent reminders to avoid duplicates (in production, use Redis)
-const sentReminders = new Map<string, number>();
-
-// Clean up old entries (keep for 2 minutes)
-function cleanupSentReminders() {
-  const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
-  for (const [key, timestamp] of sentReminders.entries()) {
-    if (timestamp < twoMinutesAgo) {
-      sentReminders.delete(key);
-    }
-  }
-}
-
-// GET /api/cron/reminder - Triggered by Vercel Cron every minute
+// GET /api/cron/reminder - Triggered by cron every minute
 export async function GET(request: NextRequest) {
   try {
     // Verify cron secret
     const authHeader = request.headers.get('authorization');
     if (authHeader !== `Bearer ${CRON_SECRET}`) {
-      // Also check query param for manual testing
       const secret = request.nextUrl.searchParams.get('secret');
       if (secret !== CRON_SECRET) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
       }
     }
-
-    cleanupSentReminders();
 
     await connectDB();
 
@@ -52,8 +37,9 @@ export async function GET(request: NextRequest) {
     let remindersSent = 0;
 
     for (const user of users) {
-      // Get current time in user's timezone
       const currentTime = getCurrentTimeInTimezone(user.timezone);
+      const currentDate = getDateInTimezone(user.timezone);
+      const currentMinutes = timeToMinutes(currentTime);
 
       // Find user's active plan
       const activePlan = await Plan.findOne({
@@ -63,19 +49,45 @@ export async function GET(request: NextRequest) {
 
       if (!activePlan) continue;
 
-      // Find blocks that match the current time
-      const matchingBlocks = await PlanBlock.find({
+      // Find ALL blocks for the plan
+      const blocks = await PlanBlock.find({
         planId: activePlan._id,
-        startTime: currentTime,
       }).lean();
 
-      for (const block of matchingBlocks) {
+      for (const block of blocks) {
+        const blockStartMinutes = timeToMinutes(block.startTime);
+        
+        // Check if current time is within first 2 minutes of the block start
+        // This allows for cron timing variations
+        const minutesSinceStart = currentMinutes - blockStartMinutes;
+        
+        // Only send reminder if we're within 0-2 minutes of start time
+        if (minutesSinceStart < 0 || minutesSinceStart > 2) {
+          continue;
+        }
+
         remindersProcessed++;
 
-        // Create unique key for deduplication
-        const reminderKey = `${user._id}-${block._id}-${currentTime}`;
-        if (sentReminders.has(reminderKey)) {
-          continue; // Already sent this reminder
+        // Check if we already sent a reminder today for this block
+        const existingLog = await TaskLog.findOne({
+          userId: user._id,
+          planBlockId: block._id,
+          date: currentDate,
+        });
+
+        // If log exists with status other than 'pending', skip (already handled)
+        if (existingLog && existingLog.status !== 'pending') {
+          continue;
+        }
+
+        // Create or get task log
+        if (!existingLog) {
+          await TaskLog.create({
+            userId: user._id,
+            planBlockId: block._id,
+            date: currentDate,
+            status: 'pending',
+          });
         }
 
         const reminderData: ReminderData = {
@@ -90,6 +102,7 @@ export async function GET(request: NextRequest) {
           const emailSent = await sendReminderEmail(user.email, reminderData);
           if (emailSent) {
             remindersSent++;
+            console.log(`Email sent to ${user.email} for task: ${block.activity}`);
           }
         }
 
@@ -101,11 +114,9 @@ export async function GET(request: NextRequest) {
           );
           if (telegramSent) {
             remindersSent++;
+            console.log(`Telegram sent to ${user.telegramChatId} for task: ${block.activity}`);
           }
         }
-
-        // Mark as sent
-        sentReminders.set(reminderKey, Date.now());
       }
     }
 
@@ -125,7 +136,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Also support POST for Vercel Cron
+// Also support POST for cron services
 export async function POST(request: NextRequest) {
   return GET(request);
 }
