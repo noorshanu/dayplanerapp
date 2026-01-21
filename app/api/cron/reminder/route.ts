@@ -58,37 +58,35 @@ export async function GET(request: NextRequest) {
         const blockStartMinutes = timeToMinutes(block.startTime);
         
         // Check if current time is within first 2 minutes of the block start
-        // This allows for cron timing variations
         const minutesSinceStart = currentMinutes - blockStartMinutes;
         
-        // Only send reminder if we're within 0-2 minutes of start time
+        // Only consider if we're within 0-2 minutes of start time
         if (minutesSinceStart < 0 || minutesSinceStart > 2) {
           continue;
         }
 
         remindersProcessed++;
 
-        // Check if we already sent a reminder today for this block
+        // Check if we already have a TaskLog for this block today
         const existingLog = await TaskLog.findOne({
           userId: user._id,
           planBlockId: block._id,
           date: currentDate,
         });
 
-        // If log exists with status other than 'pending', skip (already handled)
-        if (existingLog && existingLog.status !== 'pending') {
+        // If log already exists, we've already sent a reminder - SKIP
+        if (existingLog) {
           continue;
         }
 
-        // Create or get task log
-        if (!existingLog) {
-          await TaskLog.create({
-            userId: user._id,
-            planBlockId: block._id,
-            date: currentDate,
-            status: 'pending',
-          });
-        }
+        // Create task log to mark that we're sending a reminder
+        // This prevents duplicate sends
+        await TaskLog.create({
+          userId: user._id,
+          planBlockId: block._id,
+          date: currentDate,
+          status: 'pending',
+        });
 
         const reminderData: ReminderData = {
           startTime: block.startTime,
