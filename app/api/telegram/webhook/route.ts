@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sendTelegramMessage } from '@/lib/telegram';
+import connectDB from '@/lib/db';
+import User from '@/models/User';
+import TelegramLink from '@/models/TelegramLink';
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://dayplanerapp.vercel.app';
 
 interface TelegramUpdate {
   update_id: number;
@@ -26,7 +28,6 @@ interface TelegramUpdate {
 // POST /api/telegram/webhook - Handle Telegram bot updates
 export async function POST(request: NextRequest) {
   try {
-    // Verify the request is from Telegram (optional: add secret token verification)
     const update: TelegramUpdate = await request.json();
 
     if (!update.message?.text) {
@@ -42,28 +43,42 @@ export async function POST(request: NextRequest) {
       const parts = text.split(' ');
 
       if (parts.length > 1) {
-        // Has a link token - verify it
+        // Has a link token - verify it directly via database
         const linkToken = parts[1];
 
         try {
-          const response = await fetch(
-            `${APP_URL}/api/telegram/link?token=${linkToken}&chatId=${chatId}`
-          );
+          await connectDB();
 
-          const data = await response.json();
+          // Find the pending link in MongoDB
+          const pendingLink = await TelegramLink.findOne({
+            token: linkToken,
+            used: false,
+            expiresAt: { $gt: new Date() },
+          });
 
-          if (response.ok) {
+          if (!pendingLink) {
             await sendTelegramMessage(
               chatId,
-              `✅ <b>Connected Successfully!</b>\n\nHi ${firstName}! Your Telegram is now connected to <b>${data.email}</b>.\n\nYou'll receive routine reminders here when they're scheduled. 📅\n\nManage your settings at: ${APP_URL}/settings`
+              `❌ <b>Connection Failed</b>\n\nThe link has expired or is invalid.\n\nPlease generate a new link from your Day Planner settings.`
             );
-          } else {
-            await sendTelegramMessage(
-              chatId,
-              `❌ <b>Connection Failed</b>\n\n${data.error || 'The link has expired or is invalid.'}\n\nPlease generate a new link from your Day Planner settings.`
-            );
+            return NextResponse.json({ ok: true });
           }
-        } catch {
+
+          // Update user with Telegram chat ID
+          await User.findByIdAndUpdate(pendingLink.userId, {
+            telegramChatId: chatId,
+          });
+
+          // Mark token as used
+          pendingLink.used = true;
+          await pendingLink.save();
+
+          await sendTelegramMessage(
+            chatId,
+            `✅ <b>Connected Successfully!</b>\n\nHi ${firstName}! Your Telegram is now connected to <b>${pendingLink.email}</b>.\n\nYou'll receive routine reminders here when they're scheduled. 📅\n\nManage your settings at: ${APP_URL}/settings`
+          );
+        } catch (error) {
+          console.error('Telegram connection error:', error);
           await sendTelegramMessage(
             chatId,
             `❌ <b>Connection Failed</b>\n\nSomething went wrong. Please try again later.`
@@ -79,30 +94,43 @@ export async function POST(request: NextRequest) {
     } else if (text === '/help') {
       await sendTelegramMessage(
         chatId,
-        `📚 <b>Day Planner Bot Help</b>\n\n<b>Commands:</b>\n/start - Start the bot or connect your account\n/help - Show this help message\n/status - Check your connection status\n\n<b>Need help?</b>\nVisit ${APP_URL} to manage your routines and settings.`
+        `📚 <b>Day Planner Bot Help</b>\n\n<b>Commands:</b>\n/start - Start the bot or connect your account\n/help - Show this help message\n/status - Check your connection status\n/great - Log great mood\n/okay - Log okay mood\n/bad - Log bad mood\n\n<b>Need help?</b>\nVisit ${APP_URL} to manage your routines and settings.`
       );
     } else if (text === '/status') {
-      await sendTelegramMessage(
-        chatId,
-        `ℹ️ <b>Connection Status</b>\n\nYour Telegram Chat ID: <code>${chatId}</code>\n\nIf you're connected, you'll receive reminders at your scheduled times. Check your settings at ${APP_URL}/settings.`
-      );
+      try {
+        await connectDB();
+        const user = await User.findOne({ telegramChatId: chatId });
+        
+        if (user) {
+          await sendTelegramMessage(
+            chatId,
+            `✅ <b>Connected!</b>\n\nYour Telegram is connected to <b>${user.email}</b>.\n\nEmail reminders: ${user.reminderPrefs.email ? '✅' : '❌'}\nTelegram reminders: ${user.reminderPrefs.telegram ? '✅' : '❌'}`
+          );
+        } else {
+          await sendTelegramMessage(
+            chatId,
+            `❌ <b>Not Connected</b>\n\nYour Telegram is not connected to any account.\n\nVisit ${APP_URL}/settings to connect.`
+          );
+        }
+      } catch {
+        await sendTelegramMessage(
+          chatId,
+          `ℹ️ <b>Connection Status</b>\n\nYour Telegram Chat ID: <code>${chatId}</code>\n\nCheck your settings at ${APP_URL}/settings.`
+        );
+      }
     } else if (text === '/great' || text === '/okay' || text === '/bad') {
       // Handle reflection mood commands
-      const mood = text.slice(1); // Remove the '/'
+      const mood = text.slice(1);
       try {
-        // Find user by chatId and submit reflection
-        const connectDB = (await import('@/lib/db')).default;
-        const User = (await import('@/models/User')).default;
+        await connectDB();
         const DailyReflection = (await import('@/models/DailyReflection')).default;
         const { getDateInTimezone } = await import('@/lib/timezone');
 
-        await connectDB();
         const user = await User.findOne({ telegramChatId: chatId });
 
         if (user) {
           const date = getDateInTimezone(user.timezone);
 
-          // Check if reflection already exists
           const existing = await DailyReflection.findOne({
             userId: user._id,
             date,
@@ -144,20 +172,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Telegram webhook error:', error);
-    return NextResponse.json({ ok: true }); // Always return 200 to Telegram
+    return NextResponse.json({ ok: true });
   }
 }
 
-// GET /api/telegram/webhook - Set up webhook (for initial configuration)
+// GET /api/telegram/webhook - Set up webhook
 export async function GET(request: NextRequest) {
   try {
     const secret = request.nextUrl.searchParams.get('secret');
 
-    // Simple secret check to prevent unauthorized webhook setup
     if (secret !== process.env.CRON_SECRET) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     if (!TELEGRAM_BOT_TOKEN) {
       return NextResponse.json(
         { error: 'Telegram bot token not configured' },
